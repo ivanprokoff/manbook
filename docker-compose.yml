@@ -1,0 +1,11 @@
+version: "3.8"
+
+services:
+  rate-bot:
+    build: .
+    container_name: rate-bot
+    restart: unless-stopped
+    env_file:
+      - .env
+    volumes:
+      - ./data:/app/data
