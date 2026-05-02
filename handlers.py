@@ -219,6 +219,38 @@ async def add_contact_skip(update: Update, context: ContextTypes.DEFAULT_TYPE):
     return await _finish_add(update, context, callback_query=query)
 
 
+async def _broadcast_voting(
+    context: ContextTypes.DEFAULT_TYPE,
+    girl_id: int,
+    name: str,
+    photo_file_id: str,
+    exclude_user: int = None
+):
+    """Отправляет голосовалку всем юзерам из whitelist."""
+    keyboard = _build_vote_keyboard(girl_id)
+    caption = f"**Оцените: {name}**\nВыберите оценку от 1 до 10:"
+
+    # Собираем всех юзеров: из .env + из БД
+    all_users = set(ALLOWED_USERS) | set(db.get_all_whitelist())
+    if ADMIN_ID:
+        all_users.add(ADMIN_ID)
+
+    for uid in all_users:
+        if uid == exclude_user:
+            continue
+        try:
+            msg = await context.bot.send_photo(
+                chat_id=uid,
+                photo=photo_file_id,
+                caption=caption,
+                reply_markup=keyboard,
+                parse_mode="Markdown"
+            )
+            db.save_active_poll(girl_id, uid, msg.message_id)
+        except Exception:
+            # Юзер не начал чат с ботом / заблокировал — пропускаем
+            pass
+
 async def _finish_add(update: Update, context: ContextTypes.DEFAULT_TYPE, callback_query=None):
     user_data = context.user_data
     photo_file_id = user_data["photo_file_id"]
@@ -228,8 +260,8 @@ async def _finish_add(update: Update, context: ContextTypes.DEFAULT_TYPE, callba
 
     girl_id = db.add_girl(name, contact, photo_file_id, submitted_by)
 
-    chat_id = update.effective_chat.id
-    await _start_voting(context, chat_id, girl_id, name, photo_file_id)
+    # Рассылаем голосование ВСЕМ
+    await _broadcast_voting(context, girl_id, name, photo_file_id)
 
     text = f"**{name}** добавлена! Голосование запущено."
     if callback_query:
