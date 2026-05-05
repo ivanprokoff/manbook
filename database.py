@@ -4,6 +4,7 @@ from config import DATABASE_PATH
 
 
 def get_connection():
+    """Создаёт подключение к базе данных"""
     os.makedirs(os.path.dirname(DATABASE_PATH), exist_ok=True)
     conn = sqlite3.connect(DATABASE_PATH)
     conn.row_factory = sqlite3.Row
@@ -11,6 +12,7 @@ def get_connection():
 
 
 def init_db():
+    """Инициализирует все таблицы в базе данных"""
     conn = get_connection()
     cursor = conn.cursor()
     cursor.executescript("""
@@ -49,9 +51,10 @@ def init_db():
     conn.close()
 
 
-# ========== Whitelist (персистентный) ==========
+# ========== Whitelist ==========
 
 def load_whitelist() -> set[int]:
+    """Загружает все ID из whitelist"""
     conn = get_connection()
     cursor = conn.cursor()
     cursor.execute("SELECT user_id FROM whitelist")
@@ -61,6 +64,7 @@ def load_whitelist() -> set[int]:
 
 
 def add_to_whitelist(user_id: int):
+    """Добавляет пользователя в whitelist"""
     conn = get_connection()
     cursor = conn.cursor()
     cursor.execute("INSERT OR IGNORE INTO whitelist (user_id) VALUES (?)", (user_id,))
@@ -69,6 +73,7 @@ def add_to_whitelist(user_id: int):
 
 
 def remove_from_whitelist(user_id: int):
+    """Удаляет пользователя из whitelist"""
     conn = get_connection()
     cursor = conn.cursor()
     cursor.execute("DELETE FROM whitelist WHERE user_id = ?", (user_id,))
@@ -77,6 +82,7 @@ def remove_from_whitelist(user_id: int):
 
 
 def is_in_whitelist(user_id: int) -> bool:
+    """Проверяет, есть ли пользователь в whitelist"""
     conn = get_connection()
     cursor = conn.cursor()
     cursor.execute("SELECT user_id FROM whitelist WHERE user_id = ?", (user_id,))
@@ -86,6 +92,7 @@ def is_in_whitelist(user_id: int) -> bool:
 
 
 def get_all_whitelist() -> list[int]:
+    """Возвращает список всех ID в whitelist"""
     conn = get_connection()
     cursor = conn.cursor()
     cursor.execute("SELECT user_id FROM whitelist ORDER BY user_id")
@@ -97,19 +104,40 @@ def get_all_whitelist() -> list[int]:
 # ========== Girls ==========
 
 def add_girl(name: str, contact: str, photo_file_id: str, submitted_by: int) -> int:
+    """
+    Добавляет новую девушку в базу.
+    Возвращает ID созданной записи.
+    """
     conn = get_connection()
     cursor = conn.cursor()
-    cursor.execute(
-        "INSERT INTO girls (name, contact, photo_file_id, submitted_by) VALUES (?, ?, ?, ?)",
-        (name, contact, photo_file_id, submitted_by)
-    )
-    conn.commit()
-    girl_id = cursor.lastrowid
+
+    # Проверяем, нет ли уже записи с таким же именем
+    cursor.execute("SELECT id FROM girls WHERE name = ?", (name,))
+    existing = cursor.fetchone()
+
+    if existing:
+        # Если запись существует — обновляем фото и контакт, возвращаем существующий ID
+        cursor.execute(
+            "UPDATE girls SET photo_file_id = ?, contact = ? WHERE id = ?",
+            (photo_file_id, contact, existing["id"])
+        )
+        conn.commit()
+        girl_id = existing["id"]
+    else:
+        # Иначе создаём новую запись
+        cursor.execute(
+            "INSERT INTO girls (name, contact, photo_file_id, submitted_by) VALUES (?, ?, ?, ?)",
+            (name, contact, photo_file_id, submitted_by)
+        )
+        conn.commit()
+        girl_id = cursor.lastrowid
+
     conn.close()
     return girl_id
 
 
 def get_girl(girl_id: int):
+    """Возвращает запись о девушке по ID"""
     conn = get_connection()
     cursor = conn.cursor()
     cursor.execute("SELECT * FROM girls WHERE id = ?", (girl_id,))
@@ -119,16 +147,23 @@ def get_girl(girl_id: int):
 
 
 def get_all_girls_ranked():
+    """
+    Возвращает список всех девушек, отсортированных по рейтингу.
+    Дубликаты по именам исключены.
+    """
     conn = get_connection()
     cursor = conn.cursor()
     cursor.execute("""
         SELECT 
-            g.id, g.name, g.contact, g.photo_file_id,
+            g.id, 
+            g.name, 
+            g.contact, 
+            g.photo_file_id,
             COALESCE(SUM(v.score * v.weight) / NULLIF(SUM(v.weight), 0), 0) as avg_score,
             COUNT(v.id) as vote_count
         FROM girls g
         LEFT JOIN votes v ON g.id = v.girl_id
-        GROUP BY g.id
+        GROUP BY g.id, g.name
         ORDER BY avg_score DESC
     """)
     rows = cursor.fetchall()
@@ -137,6 +172,7 @@ def get_all_girls_ranked():
 
 
 def delete_girl(girl_id: int):
+    """Удаляет девушку и все связанные данные (голоса, опросы)"""
     conn = get_connection()
     cursor = conn.cursor()
     cursor.execute("DELETE FROM votes WHERE girl_id = ?", (girl_id,))
@@ -149,6 +185,10 @@ def delete_girl(girl_id: int):
 # ========== Votes ==========
 
 def add_vote(girl_id: int, user_id: int, score: float, weight: float = 1.0) -> bool:
+    """
+    Добавляет или обновляет голос пользователя.
+    Возвращает True если это новый голос, False если обновление существующего.
+    """
     conn = get_connection()
     cursor = conn.cursor()
     try:
@@ -158,6 +198,7 @@ def add_vote(girl_id: int, user_id: int, score: float, weight: float = 1.0) -> b
         )
         is_new = True
     except sqlite3.IntegrityError:
+        # Если голос уже существует — обновляем его
         cursor.execute(
             "UPDATE votes SET score = ?, weight = ? WHERE girl_id = ? AND user_id = ?",
             (score, weight, girl_id, user_id)
@@ -169,6 +210,7 @@ def add_vote(girl_id: int, user_id: int, score: float, weight: float = 1.0) -> b
 
 
 def get_weighted_average(girl_id: int) -> tuple:
+    """Возвращает средневзвешенную оценку и количество голосов для девушки"""
     conn = get_connection()
     cursor = conn.cursor()
     cursor.execute(
@@ -183,6 +225,7 @@ def get_weighted_average(girl_id: int) -> tuple:
 
 
 def has_user_voted(girl_id: int, user_id: int) -> bool:
+    """Проверяет, голосовал ли пользователь за данную девушку"""
     conn = get_connection()
     cursor = conn.cursor()
     cursor.execute(
@@ -197,6 +240,7 @@ def has_user_voted(girl_id: int, user_id: int) -> bool:
 # ========== Active Polls ==========
 
 def save_active_poll(girl_id: int, chat_id: int, message_id: int):
+    """Сохраняет информацию об активном опросе"""
     conn = get_connection()
     cursor = conn.cursor()
     cursor.execute(
@@ -208,6 +252,7 @@ def save_active_poll(girl_id: int, chat_id: int, message_id: int):
 
 
 def remove_active_poll(girl_id: int):
+    """Удаляет информацию об опросе"""
     conn = get_connection()
     cursor = conn.cursor()
     cursor.execute("DELETE FROM active_polls WHERE girl_id = ?", (girl_id,))
@@ -216,6 +261,7 @@ def remove_active_poll(girl_id: int):
 
 
 def get_active_poll(girl_id: int):
+    """Возвращает информацию об активном опросе"""
     conn = get_connection()
     cursor = conn.cursor()
     cursor.execute("SELECT * FROM active_polls WHERE girl_id = ?", (girl_id,))

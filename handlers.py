@@ -14,36 +14,41 @@ import database as db
 WAITING_PHOTO, WAITING_NAME, WAITING_CONTACT = range(3)
 
 
-# ========== Access Control ==========
+# ========== Контроль доступа ==========
 
 def _is_admin(user_id: int) -> bool:
+    """Проверяет, является ли пользователь админом"""
     return ADMIN_ID is not None and user_id == ADMIN_ID
 
 
 def is_user_allowed(user_id: int) -> bool:
+    """Проверяет, есть ли у пользователя доступ к боту"""
     if ACCESS_MODE != "whitelist":
         return True
     if _is_admin(user_id):
         return True
-    # Check both .env list and DB
     if user_id in ALLOWED_USERS:
         return True
     return db.is_in_whitelist(user_id)
 
 
 def check_chat(update: Update) -> bool:
+    """Проверяет, разрешён ли чат"""
     if ALLOWED_CHAT_ID is None:
         return True
     return update.effective_chat.id == ALLOWED_CHAT_ID
 
 
 async def _guard(update: Update) -> bool:
-    """Returns True if access is DENIED."""
+    """
+    Проверка доступа.
+    Возвращает True если доступ ЗАПРЕЩЁН.
+    """
     if not is_user_allowed(update.effective_user.id):
         await update.effective_message.reply_text(
-            "You don't have access to this bot.\n"
-            f"Your ID: `{update.effective_user.id}`\n"
-            "Ask admin to add you via /allow",
+            "У тебя нет доступа к этому боту.\n"
+            f"Твой ID: `{update.effective_user.id}`\n"
+            "Попроси админа добавить тебя через /allow",
             parse_mode="Markdown"
         )
         return True
@@ -53,15 +58,16 @@ async def _guard(update: Update) -> bool:
 # ========== /start ==========
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Обработчик команды /start"""
     if await _guard(update):
         return
     text = (
         "MANBOOK\n\n"
-        "Commands:\n"
-        "/add - add a girl (photo + name)\n"
-        "/tierlist - show tier list\n"
-        "/top - top 10\n"
-        "/help - help\n"
+        "Команды:\n"
+        "/add — добавить девушку (фото + имя)\n"
+        "/tierlist — показать тирлист\n"
+        "/top — топ-10\n"
+        "/help — помощь\n"
     )
     await update.message.reply_text(text, parse_mode="Markdown")
 
@@ -69,9 +75,10 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # ========== /myid ==========
 
 async def myid(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Показывает ID пользователя и статус доступа"""
     uid = update.effective_user.id
     name = update.effective_user.full_name
-    allowed = "Access granted" if is_user_allowed(uid) else "No access"
+    allowed = "Доступ есть" if is_user_allowed(uid) else "Нет доступа"
     await update.message.reply_text(
         f"**{name}**\n"
         f"`{uid}`\n"
@@ -80,17 +87,18 @@ async def myid(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 
-# ========== Admin Commands ==========
+# ========== Админ-команды ==========
 
 async def allow_user(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Добавляет пользователя в whitelist (только для админа)"""
     if not _is_admin(update.effective_user.id):
-        await update.message.reply_text("Admin only.")
+        await update.message.reply_text("Только для админа.")
         return
 
     if not context.args:
         await update.message.reply_text(
-            "Usage: `/allow 123456`\n"
-            "Or `/allow 123456 789012 345678`",
+            "Использование: `/allow 123456`\n"
+            "Или `/allow 123456 789012 345678`",
             parse_mode="Markdown"
         )
         return
@@ -107,19 +115,20 @@ async def allow_user(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if added:
         total = len(db.get_all_whitelist())
         await update.message.reply_text(
-            f"Added: {', '.join(f'`{u}`' for u in added)}\n"
-            f"Total in whitelist (DB): {total}",
+            f"Добавлены: {', '.join(f'`{u}`' for u in added)}\n"
+            f"Всего в whitelist (БД): {total}",
             parse_mode="Markdown"
         )
 
 
 async def deny_user(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Удаляет пользователя из whitelist (только для админа)"""
     if not _is_admin(update.effective_user.id):
-        await update.message.reply_text("Admin only.")
+        await update.message.reply_text("Только для админа.")
         return
 
     if not context.args:
-        await update.message.reply_text("Usage: `/deny 123456`", parse_mode="Markdown")
+        await update.message.reply_text("Использование: `/deny 123456`", parse_mode="Markdown")
         return
 
     removed = []
@@ -133,14 +142,15 @@ async def deny_user(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if removed:
         await update.message.reply_text(
-            f"Removed: {', '.join(f'`{u}`' for u in removed)}",
+            f"Удалены: {', '.join(f'`{u}`' for u in removed)}",
             parse_mode="Markdown"
         )
 
 
 async def list_users(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Показывает список всех пользователей в whitelist (только для админа)"""
     if not _is_admin(update.effective_user.id):
-        await update.message.reply_text("Admin only.")
+        await update.message.reply_text("Только для админа.")
         return
 
     db_users = db.get_all_whitelist()
@@ -149,70 +159,75 @@ async def list_users(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = "**Whitelist:**\n\n"
 
     if env_users:
-        text += "**From .env:**\n"
+        text += "**Из .env:**\n"
         for uid in env_users:
-            text += f"  * `{uid}`\n"
+            text += f"  • `{uid}`\n"
         text += "\n"
 
     if db_users:
-        text += "**From DB (added via /allow):**\n"
+        text += "**Из БД (добавлены через /allow):**\n"
         for uid in db_users:
-            text += f"  * `{uid}`\n"
+            text += f"  • `{uid}`\n"
         text += "\n"
 
     if not env_users and not db_users:
-        text += "Empty.\n"
+        text += "Пусто.\n"
 
     all_unique = set(env_users) | set(db_users)
-    text += f"Total unique: {len(all_unique)}"
+    text += f"Всего уникальных: {len(all_unique)}"
     await update.message.reply_text(text, parse_mode="Markdown")
 
 
-# ========== Add Girl ==========
+# ========== Добавление девушки ==========
 
 async def add_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Начинает процесс добавления девушки"""
     if await _guard(update):
         return ConversationHandler.END
     if not check_chat(update):
         return ConversationHandler.END
-    await update.message.reply_text("Send a photo of the girl:")
+    await update.message.reply_text("Отправь фото девушки:")
     return WAITING_PHOTO
 
 
 async def add_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Принимает фото и спрашивает имя"""
     if update.message.photo:
         photo = update.message.photo[-1]
         context.user_data["photo_file_id"] = photo.file_id
-        await update.message.reply_text("Now enter her name (or nickname):")
+        await update.message.reply_text("Теперь введи имя (или ник):")
         return WAITING_NAME
     else:
-        await update.message.reply_text("That's not a photo. Send a photo:")
+        await update.message.reply_text("Это не фото. Отправь фото:")
         return WAITING_PHOTO
 
 
 async def add_name(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Принимает имя и спрашивает контакт"""
     name = update.message.text.strip()
     if not name or len(name) > 100:
-        await update.message.reply_text("Name must be 1-100 characters. Try again:")
+        await update.message.reply_text("Имя должно быть от 1 до 100 символов. Попробуй ещё:")
         return WAITING_NAME
 
     context.user_data["name"] = name
 
-    keyboard = [[InlineKeyboardButton("Skip", callback_data="skip_contact")]]
+    keyboard = [[InlineKeyboardButton("Пропустить", callback_data="skip_contact")]]
     await update.message.reply_text(
-        "Enter contact (@ or link), or press Skip:",
+        "Введи контакт (@ или ссылку), или нажми «Пропустить»:",
         reply_markup=InlineKeyboardMarkup(keyboard)
     )
     return WAITING_CONTACT
 
 
 async def add_contact_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Принимает контакт и завершает добавление"""
     contact = update.message.text.strip()
     context.user_data["contact"] = contact
     return await _finish_add(update, context)
 
 
 async def add_contact_skip(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Пропускает шаг с контактом и завершает добавление"""
     query = update.callback_query
     await query.answer()
     context.user_data["contact"] = None
@@ -226,11 +241,10 @@ async def _broadcast_voting(
     photo_file_id: str,
     exclude_user: int = None
 ):
-    """Sends voting to all users from whitelist."""
+    """Рассылает голосование всем пользователям из whitelist"""
     keyboard = _build_vote_keyboard(girl_id)
-    caption = f"**Rate: {name}**\nChoose a rating from 1 to 10:"
+    caption = f"**Оцените: {name}**\nВыберите оценку от 1 до 10:"
 
-    # Collect all users: from .env + from DB
     all_users = set(ALLOWED_USERS) | set(db.get_all_whitelist())
     if ADMIN_ID:
         all_users.add(ADMIN_ID)
@@ -248,11 +262,12 @@ async def _broadcast_voting(
             )
             db.save_active_poll(girl_id, uid, msg.message_id)
         except Exception:
-            # User hasn't started chat with bot / blocked - skip
+            # Пользователь не начал чат с ботом или заблокировал его
             pass
 
 
 async def _finish_add(update: Update, context: ContextTypes.DEFAULT_TYPE, callback_query=None):
+    """Завершает добавление девушки и запускает голосование"""
     user_data = context.user_data
     photo_file_id = user_data["photo_file_id"]
     name = user_data["name"]
@@ -261,10 +276,10 @@ async def _finish_add(update: Update, context: ContextTypes.DEFAULT_TYPE, callba
 
     girl_id = db.add_girl(name, contact, photo_file_id, submitted_by)
 
-    # Broadcast voting to ALL users (including the submitter)
+    # Рассылаем голосование всем (включая автора)
     await _broadcast_voting(context, girl_id, name, photo_file_id)
 
-    text = f"**{name}** has been added! Voting started."
+    text = f"**{name}** добавлена! Голосование запущено."
     if callback_query:
         await callback_query.edit_message_text(text, parse_mode="Markdown")
     else:
@@ -275,14 +290,16 @@ async def _finish_add(update: Update, context: ContextTypes.DEFAULT_TYPE, callba
 
 
 async def add_cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Отменяет процесс добавления"""
     context.user_data.clear()
-    await update.message.reply_text("Addition cancelled.")
+    await update.message.reply_text("Добавление отменено.")
     return ConversationHandler.END
 
 
-# ========== Voting ==========
+# ========== Голосование ==========
 
 def _build_vote_keyboard(girl_id: int) -> InlineKeyboardMarkup:
+    """Создаёт клавиатуру с кнопками оценок от 1 до 10"""
     buttons = []
     row = []
     for i in range(1, 11):
@@ -293,37 +310,18 @@ def _build_vote_keyboard(girl_id: int) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(buttons)
 
 
-async def _start_voting(
-    context: ContextTypes.DEFAULT_TYPE,
-    chat_id: int,
-    girl_id: int,
-    name: str,
-    photo_file_id: str
-):
-    keyboard = _build_vote_keyboard(girl_id)
-    caption = f"**Rate: {name}**\nChoose a rating from 1 to 10:"
-
-    msg = await context.bot.send_photo(
-        chat_id=chat_id,
-        photo=photo_file_id,
-        caption=caption,
-        reply_markup=keyboard,
-        parse_mode="Markdown"
-    )
-    db.save_active_poll(girl_id, chat_id, msg.message_id)
-
-
 async def vote_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Обрабатывает нажатие на кнопку оценки"""
     query = update.callback_query
     user_id = query.from_user.id
 
     if not is_user_allowed(user_id):
-        await query.answer("You don't have access.", show_alert=True)
+        await query.answer("У тебя нет доступа.", show_alert=True)
         return
 
     parts = query.data.split("_")
     if len(parts) != 3:
-        await query.answer("Error")
+        await query.answer("Ошибка")
         return
 
     girl_id = int(parts[1])
@@ -331,21 +329,21 @@ async def vote_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     girl = db.get_girl(girl_id)
     if not girl:
-        await query.answer("Record not found")
+        await query.answer("Запись не найдена")
         return
 
     is_new = db.add_vote(girl_id, user_id, score)
     avg, count = db.get_weighted_average(girl_id)
 
     if is_new:
-        await query.answer(f"Your rating: {score}")
+        await query.answer(f"Твоя оценка: {score}")
     else:
-        await query.answer(f"Rating updated: {score}")
+        await query.answer(f"Оценка обновлена: {score}")
 
     new_caption = (
-        f"**Rate: {girl['name']}**\n"
-        f"Choose a rating from 1 to 10:\n\n"
-        f"Current rating: **{avg}** ({count} votes)"
+        f"**Оцените: {girl['name']}**\n"
+        f"Выберите оценку от 1 до 10:\n\n"
+        f"Текущий рейтинг: **{avg}** ({count} голосов)"
     )
 
     try:
@@ -355,24 +353,22 @@ async def vote_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             parse_mode="Markdown"
         )
     except Exception:
+        # Сообщение могло не измениться — игнорируем
         pass
 
 
-# ========== Tier List ==========
+# ========== Тирлист ==========
 
 def _get_tier(score: float) -> str:
+    """Определяет тир на основе оценки"""
     for tier, boundary in TIER_BOUNDARIES.items():
         if score >= boundary:
             return tier
     return "F"
 
 
-TIER_EMOJI = {
-    "S": "[S]", "A": "[A]", "B": "[B]", "C": "[C]", "D": "[D]", "F": "[F]"
-}
-
-
 async def tierlist(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Показывает тирлист всех девушек"""
     if await _guard(update):
         return
     if not check_chat(update):
@@ -380,9 +376,10 @@ async def tierlist(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     girls = db.get_all_girls_ranked()
     if not girls:
-        await update.message.reply_text("No one here yet. Use /add")
+        await update.message.reply_text("Пока никого нет. Используй /add")
         return
 
+    # Группируем по тирам
     tiers = {}
     for girl in girls:
         if girl["vote_count"] < MIN_VOTES:
@@ -400,22 +397,25 @@ async def tierlist(update: Update, context: ContextTypes.DEFAULT_TYPE):
     for tier in tier_order:
         if tier not in tiers:
             continue
-        emoji = TIER_EMOJI.get(tier, "?")
-        text += f"**{emoji} Tier {tier}:**\n"
+        text += f"**Tier {tier}:**\n"
         for g in tiers[tier]:
             score_str = f"{g['avg_score']:.1f}" if g["vote_count"] >= MIN_VOTES else "N/A"
-            text += f"  * {g['name']} -- {score_str} ({g['vote_count']} votes)\n"
+            text += f"  • {g['name']} — {score_str} ({g['vote_count']} голосов)\n"
         text += "\n"
 
+    # Кнопки с уникальными именами (без дублей)
+    seen_names = set()
     buttons = []
     row = []
     for girl in girls:
-        row.append(InlineKeyboardButton(
-            girl["name"], callback_data=f"show_{girl['id']}"
-        ))
-        if len(row) == 3:
-            buttons.append(row)
-            row = []
+        if girl["name"] not in seen_names:
+            seen_names.add(girl["name"])
+            row.append(InlineKeyboardButton(
+                girl["name"], callback_data=f"show_{girl['id']}"
+            ))
+            if len(row) == 3:
+                buttons.append(row)
+                row = []
     if row:
         buttons.append(row)
 
@@ -424,30 +424,30 @@ async def tierlist(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def show_girl_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Показывает фото и информацию о девушке по нажатию на кнопку"""
     query = update.callback_query
     user_id = query.from_user.id
 
     if not is_user_allowed(user_id):
-        await query.answer("No access.", show_alert=True)
+        await query.answer("Нет доступа.", show_alert=True)
         return
 
     girl_id = int(query.data.split("_")[1])
 
     girl = db.get_girl(girl_id)
     if not girl:
-        await query.answer("Not found")
+        await query.answer("Не найдена")
         return
 
     avg, count = db.get_weighted_average(girl_id)
     tier = _get_tier(avg) if count >= MIN_VOTES else "?"
-    emoji = TIER_EMOJI.get(tier, "?")
 
     caption = (
-        f"**{girl['name']}** {emoji} Tier {tier}\n"
-        f"Rating: {avg} ({count} votes)\n"
+        f"**{girl['name']}** — Tier {tier}\n"
+        f"Рейтинг: {avg} ({count} голосов)\n"
     )
     if girl["contact"]:
-        caption += f"Contact: {girl['contact']}\n"
+        caption += f"Контакт: {girl['contact']}\n"
 
     await query.answer()
     await context.bot.send_photo(
@@ -458,9 +458,10 @@ async def show_girl_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
     )
 
 
-# ========== Top ==========
+# ========== Топ ==========
 
 async def top(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Показывает топ-10 девушек по рейтингу"""
     if await _guard(update):
         return
     if not check_chat(update):
@@ -468,80 +469,84 @@ async def top(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     girls = db.get_all_girls_ranked()
     if not girls:
-        await update.message.reply_text("No one here yet.")
+        await update.message.reply_text("Пока никого нет.")
         return
 
     ranked = [g for g in girls if g["vote_count"] >= MIN_VOTES]
 
     if not ranked:
-        await update.message.reply_text(f"No entries with {MIN_VOTES}+ votes yet.")
+        await update.message.reply_text(f"Пока нет записей с {MIN_VOTES}+ голосами.")
         return
 
     text = "**TOP 10:**\n\n"
     for i, g in enumerate(ranked[:10], 1):
-        text += f"{i}. **{g['name']}** -- {g['avg_score']:.1f} ({g['vote_count']} votes)\n"
+        text += f"{i}. **{g['name']}** — {g['avg_score']:.1f} ({g['vote_count']} голосов)\n"
 
     await update.message.reply_text(text, parse_mode="Markdown")
 
 
-# ========== Delete ==========
+# ========== Удаление ==========
 
 async def delete_girl_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Удаляет запись о девушке (свою или любую для админа)"""
     if await _guard(update):
         return
 
     if not context.args:
-        await update.message.reply_text("Usage: /delete <id>")
+        await update.message.reply_text("Использование: /delete <id>")
         return
 
     try:
         girl_id = int(context.args[0])
     except ValueError:
-        await update.message.reply_text("ID must be a number.")
+        await update.message.reply_text("ID должен быть числом.")
         return
 
     girl = db.get_girl(girl_id)
     if not girl:
-        await update.message.reply_text("Not found.")
+        await update.message.reply_text("Не найдена.")
         return
 
+    # Только автор записи или админ может удалить
     if girl["submitted_by"] != update.effective_user.id and not _is_admin(update.effective_user.id):
-        await update.message.reply_text("You can only delete your own entries.")
+        await update.message.reply_text("Ты можешь удалять только свои записи.")
         return
 
     db.delete_girl(girl_id)
-    await update.message.reply_text(f"**{girl['name']}** deleted.", parse_mode="Markdown")
+    await update.message.reply_text(f"**{girl['name']}** удалена.", parse_mode="Markdown")
 
 
 # ========== Help ==========
 
 async def help_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Показывает список всех доступных команд"""
     if await _guard(update):
         return
 
     text = (
-        "**Commands:**\n\n"
-        "/add - add a girl\n"
-        "/tierlist - tier list with photo buttons\n"
-        "/top - top 10\n"
-        "/delete <id> - delete your entry\n"
-        "/cancel - cancel current action\n"
+        "**Команды:**\n\n"
+        "/add — добавить девушку\n"
+        "/tierlist — тирлист с кнопками для фото\n"
+        "/top — топ-10\n"
+        "/delete <id> — удалить свою запись\n"
+        "/cancel — отменить текущее действие\n"
     )
 
     if _is_admin(update.effective_user.id if update.effective_user else 0):
         text += (
-            "\n**Admin Commands:**\n"
-            "* /allow <id> [id2 ...] - add to whitelist\n"
-            "* /deny <id> [id2 ...] - remove from whitelist\n"
-            "* /users - show whitelist\n"
+            "\n**Админ-команды:**\n"
+            "• /allow <id> [id2 ...] — добавить в whitelist\n"
+            "• /deny <id> [id2 ...] — убрать из whitelist\n"
+            "• /users — список whitelist\n"
         )
 
     await update.message.reply_text(text, parse_mode="Markdown")
 
 
-# ========== Handler Setup ==========
+# ========== Сборка хендлеров ==========
 
 def get_add_conversation_handler() -> ConversationHandler:
+    """Создаёт ConversationHandler для процесса добавления девушки"""
     return ConversationHandler(
         entry_points=[CommandHandler("add", add_start)],
         states={
